@@ -754,19 +754,46 @@
 
     .capsule-stage.revealing {
       position: relative;
+      place-items: stretch;
       background:
-        linear-gradient(135deg, rgba(255, 189, 63, 0.16), transparent 40%),
-        linear-gradient(225deg, var(--revealWash, rgba(124, 92, 255, 0.13)), transparent 44%),
-        #fff;
+        linear-gradient(135deg, rgba(255, 189, 63, 0.14), transparent 42%),
+        linear-gradient(225deg, rgba(0, 168, 168, 0.12), transparent 40%),
+        #ffffff;
     }
 
     .inline-reveal {
       position: relative;
       width: 100%;
+      height: 100%;
       min-height: 360px;
       display: grid;
       place-items: center;
       overflow: hidden;
+    }
+
+    .reveal-roulette-backdrop {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+      transform-origin: center;
+      animation: revealRouletteAway 2800ms ease-in-out 720ms both;
+      z-index: 0;
+    }
+
+    .reveal-roulette-backdrop .capsule-ring {
+      width: clamp(300px, 36vw, 430px);
+      animation: spinRevealRing 20s linear infinite;
+    }
+
+    .reveal-roulette-backdrop .capsule-body {
+      animation: keepRevealCapsuleUpright 20s linear infinite;
+    }
+
+    .reveal-roulette-backdrop .capsule,
+    .reveal-roulette-backdrop .capsule-slot {
+      pointer-events: none;
     }
 
     .inline-reveal .revealed-capsule {
@@ -777,18 +804,20 @@
       height: min(26vw, 190px);
       min-width: 145px;
       min-height: 145px;
-      animation: selectedBallMove 2400ms cubic-bezier(.18,.9,.2,1) both;
+      animation: selectedBallMove 3300ms cubic-bezier(.2,.78,.15,1) both;
+      z-index: 2;
     }
 
     .capsule-shake-shell {
       position: absolute;
       inset: 0;
       transform-origin: center;
-      animation: selectedBallShake 820ms ease-in-out 2260ms both;
+      animation: selectedBallShake 900ms ease-in-out 3200ms both;
     }
 
     .inline-reveal .result-burst {
       padding: 22px;
+      z-index: 3;
     }
 
     .inline-reveal .result-burst h2 {
@@ -796,7 +825,16 @@
     }
 
     .inline-reveal .cap-half {
-      animation-delay: 3000ms;
+      animation-delay: 4050ms;
+      animation-duration: 900ms;
+    }
+
+    .inline-reveal .prize-chip {
+      animation-delay: 4660ms;
+    }
+
+    .inline-reveal .result-burst {
+      animation-delay: 5520ms;
     }
 
     .capsule-ring {
@@ -1207,6 +1245,13 @@
       transform: translate(-50%, -50%) scale(1);
     }
 
+    .inline-reveal.settled .reveal-roulette-backdrop {
+      animation: none;
+      opacity: 0;
+      transform: scale(0.72);
+      filter: blur(3px);
+    }
+
     .inline-reveal.settled .cap-half {
       animation: none;
     }
@@ -1449,6 +1494,16 @@
       to { transform: rotate(-360deg); }
     }
 
+    @keyframes spinRevealRing {
+      from { transform: rotate(var(--ring-angle, 0deg)); }
+      to { transform: rotate(calc(var(--ring-angle, 0deg) + 360deg)); }
+    }
+
+    @keyframes keepRevealCapsuleUpright {
+      from { transform: rotate(var(--ring-angle-inverse, 0deg)); }
+      to { transform: rotate(calc(var(--ring-angle-inverse, 0deg) - 360deg)); }
+    }
+
     @keyframes capsuleDrop {
       0% { opacity: 0; transform: translateY(-180px) rotate(-22deg); }
       56% { opacity: 1; transform: translateY(0) rotate(8deg); }
@@ -1459,10 +1514,13 @@
     @keyframes selectedBallMove {
       0% {
         opacity: 1;
-        transform: translate(calc(-50% + var(--pick-x, 0px)), calc(-50% + var(--pick-y, 0px))) scale(0.54) rotate(-10deg);
+        transform: translate(calc(-50% + var(--pick-x, 0px)), calc(-50% + var(--pick-y, 0px))) scale(var(--pick-start-scale, 0.54)) rotate(-8deg);
       }
-      68% {
-        transform: translate(-50%, -50%) scale(1.06) rotate(5deg);
+      46% {
+        transform: translate(calc(-50% + var(--pick-mid-x, 0px)), calc(-50% + var(--pick-mid-y, 0px))) scale(0.82) rotate(6deg);
+      }
+      78% {
+        transform: translate(-50%, -50%) scale(1.18) rotate(-2deg);
       }
       100% {
         opacity: 1;
@@ -1488,6 +1546,24 @@
       }
       82% {
         transform: translate(-2px, 0) scale(1) rotate(-1deg);
+      }
+    }
+
+    @keyframes revealRouletteAway {
+      0% {
+        opacity: 1;
+        filter: blur(0);
+        transform: scale(1);
+      }
+      58% {
+        opacity: 0.38;
+        filter: blur(1px);
+        transform: scale(0.84);
+      }
+      100% {
+        opacity: 0.12;
+        filter: blur(3px);
+        transform: scale(0.72);
       }
     }
 
@@ -1652,8 +1728,8 @@
   <script>
     const STORAGE_KEY = "youthCapsuleDraw.v1";
     const STATE_VERSION = 1;
-    const REVEAL_CELEBRATION_DELAY_MS = 4300;
-    const REVEAL_SETTLE_DELAY_MS = 5150;
+    const REVEAL_CELEBRATION_DELAY_MS = 5520;
+    const REVEAL_SETTLE_DELAY_MS = 6500;
     const SHUFFLE_ANIMATION_MS = 1100;
     const PHASES = ["lower", "high2", "high3", "teacher"];
     const PERSON_ROLES = ["teacher", "high3", "high2", "high1", "middle3", "middle2", "middle1"];
@@ -2270,7 +2346,7 @@
                 ${pick ? "" : `<button class="btn icon" title="되돌리기" data-action="undo" ${state.history.length && !isShuffling ? "" : "disabled"} aria-label="되돌리기">↶</button>`}
               </div>
             </div>
-            <div class="capsule-stage ${pick ? "revealing" : ""}" ${pick && pickedGroup ? `style="--revealWash:${hexToRgba(pickedGroup.color, 0.18)}"` : ""}>
+            <div class="capsule-stage ${pick ? "revealing" : ""}">
               ${pick ? renderInlineReveal(pick) : `
                 <div class="capsule-ring ${isPicking || isShuffling ? "paused" : ""} ${isShuffling ? "shuffling" : ""}" aria-label="캡슐 선택">
                   ${renderCapsuleSlots()}
@@ -2303,10 +2379,18 @@
       schedulePickSettlement(pick);
       const startX = Number.isFinite(Number(pick.startX)) ? Number(pick.startX) : 0;
       const startY = Number.isFinite(Number(pick.startY)) ? Number(pick.startY) : 0;
+      const midX = startX * 0.18;
+      const midY = startY * 0.18;
+      const ringAngle = Number.isFinite(Number(pick.ringAngle)) ? Number(pick.ringAngle) : 0;
+      const ringAngleInverse = -ringAngle;
+      const revealSize = getRevealCapsuleSize();
+      const pickSize = Number.isFinite(Number(pick.capsuleSize)) ? Number(pick.capsuleSize) : revealSize * 0.54;
+      const startScale = Math.max(0.38, Math.min(0.75, pickSize / revealSize));
 
       return `
         <div class="inline-reveal${settledClass}">
-          <div class="revealed-capsule" style="--pick-x:${startX}px; --pick-y:${startY}px" aria-hidden="true">
+          ${renderRevealRouletteBackdrop(pick, ringAngle, ringAngleInverse)}
+          <div class="revealed-capsule" style="--pick-x:${startX}px; --pick-y:${startY}px; --pick-mid-x:${midX}px; --pick-mid-y:${midY}px; --pick-start-scale:${startScale}" aria-hidden="true">
             <div class="capsule-shake-shell" style="--prize:${color}">
               <div class="prize-chip"></div>
               <div class="cap-half cap-left"></div>
@@ -2326,6 +2410,37 @@
           </div>
         </div>
       `;
+    }
+
+    function renderRevealRouletteBackdrop(pick, ringAngle = 0, ringAngleInverse = 0) {
+      const total = Math.max(pick.phaseSlotCount || state.phaseSlotCount || state.capsules.length, state.capsules.length, 1);
+      const pickedSlot = Number.isFinite(Number(pick.capsuleSlotIndex)) ? Number(pick.capsuleSlotIndex) : -1;
+      return `
+        <div class="reveal-roulette-backdrop" style="--ring-angle:${ringAngle}deg; --ring-angle-inverse:${ringAngleInverse}deg" aria-hidden="true">
+          <div class="capsule-ring">
+            ${Array.from({ length: total }, (_, slotIndex) => {
+              const capsule = state.capsules.find((item) => item.slotIndex === slotIndex);
+              if (slotIndex === pickedSlot) return renderEmptyCapsuleSlot(slotIndex, total);
+              if (!capsule) return renderEmptyCapsuleSlot(slotIndex, total);
+              return renderDisplayCapsule(slotIndex, total);
+            }).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDisplayCapsule(slotIndex, total) {
+      const angle = (360 / Math.max(total, 1)) * slotIndex;
+      return `
+        <button class="capsule" type="button" style="--angle:${angle}deg" tabindex="-1" aria-hidden="true">
+          <span class="capsule-body"></span>
+        </button>
+      `;
+    }
+
+    function getRevealCapsuleSize() {
+      if (typeof window === "undefined") return 190;
+      return Math.max(145, Math.min(window.innerWidth * 0.26, 190));
     }
 
     function schedulePickCelebration(pick, color) {
@@ -2954,6 +3069,8 @@
         phaseSlotCount: state.phaseSlotCount || state.capsules.length,
         startX: startOffset.x,
         startY: startOffset.y,
+        ringAngle: startOffset.ringAngle,
+        capsuleSize: startOffset.capsuleSize,
         settledAt: null,
         pickedAt: new Date().toISOString()
       };
@@ -2961,20 +3078,37 @@
       state.view = "draw";
       saveState();
 
-      window.setTimeout(() => {
-        isPicking = false;
-        render();
-      }, 260);
+      isPicking = false;
+      render();
     }
 
     function getCapsuleStartOffset(el) {
       const capsuleRect = el.getBoundingClientRect?.();
       const stageRect = el.closest?.(".capsule-stage")?.getBoundingClientRect?.();
-      if (!capsuleRect || !stageRect) return { x: 0, y: 0 };
+      const ringAngle = getCurrentRotationDegrees(el.closest?.(".capsule-ring"));
+      if (!capsuleRect || !stageRect) return { x: 0, y: 0, ringAngle, capsuleSize: 96 };
       return {
         x: (capsuleRect.left + capsuleRect.width / 2) - (stageRect.left + stageRect.width / 2),
-        y: (capsuleRect.top + capsuleRect.height / 2) - (stageRect.top + stageRect.height / 2)
+        y: (capsuleRect.top + capsuleRect.height / 2) - (stageRect.top + stageRect.height / 2),
+        ringAngle,
+        capsuleSize: capsuleRect.width
       };
+    }
+
+    function getCurrentRotationDegrees(el) {
+      if (!el) return 0;
+      const transform = window.getComputedStyle(el).transform;
+      if (!transform || transform === "none") return 0;
+      try {
+        const matrix = new DOMMatrixReadOnly(transform);
+        const angle = Math.atan2(matrix.b, matrix.a) * (180 / Math.PI);
+        return Number.isFinite(angle) ? angle : 0;
+      } catch (error) {
+        const values = transform.match(/matrix\(([^)]+)\)/)?.[1]?.split(",").map(Number);
+        if (!values || values.length < 4) return 0;
+        const angle = Math.atan2(values[1], values[0]) * (180 / Math.PI);
+        return Number.isFinite(angle) ? angle : 0;
+      }
     }
 
     function assign(person, groupId) {
