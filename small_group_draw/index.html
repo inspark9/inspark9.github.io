@@ -1803,6 +1803,11 @@
     let isPicking = false;
     let isShuffling = false;
     let audioCtx = null;
+    let audioAllowed = false;
+    let drawBgmTimer = null;
+    let drawBgmActive = false;
+    let openingSoundTimer = null;
+    let activeAudioNodes = [];
     let confettiPieces = [];
     let confettiFrame = null;
     let celebratedPickKey = null;
@@ -1830,6 +1835,8 @@
         render();
         return;
       }
+
+      if (capsuleEl || actionEl) audioAllowed = true;
 
       if (capsuleEl) {
         pickCapsule(capsuleEl);
@@ -1929,6 +1936,7 @@
       if (action === "toggleMute") {
         state.muted = !state.muted;
         menuOpen = false;
+        if (state.muted) stopAllAudio();
         saveState();
         render();
       }
@@ -2109,6 +2117,7 @@
         ${renderAppMenu()}
         ${renderScreen()}
       `;
+      syncAmbientAudio();
     }
 
     function renderAppMenu() {
@@ -3058,6 +3067,7 @@
       const startOffset = getCapsuleStartOffset(el);
 
       isPicking = true;
+      playOpeningSound();
       playRoll();
       pushHistory();
       state.capsules = state.capsules.filter((item) => item.id !== capsuleId);
@@ -3284,6 +3294,7 @@
     }
 
     function ensureAudio() {
+      if (!audioAllowed) return null;
       if (state.muted) return null;
       if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -3292,6 +3303,61 @@
       }
       if (audioCtx.state === "suspended") audioCtx.resume();
       return audioCtx;
+    }
+
+    function trackAudioNode(node) {
+      activeAudioNodes.push(node);
+      node.addEventListener?.("ended", () => {
+        activeAudioNodes = activeAudioNodes.filter((item) => item !== node);
+      }, { once: true });
+    }
+
+    function stopActiveAudioNodes() {
+      activeAudioNodes.forEach((node) => {
+        try {
+          node.stop(0);
+        } catch (error) {
+          // Scheduled nodes may already be stopped.
+        }
+      });
+      activeAudioNodes = [];
+    }
+
+    function stopDrawBgm() {
+      if (drawBgmTimer) {
+        window.clearInterval(drawBgmTimer);
+        drawBgmTimer = null;
+      }
+      drawBgmActive = false;
+    }
+
+    function stopOpeningSound() {
+      if (openingSoundTimer) {
+        window.clearTimeout(openingSoundTimer);
+        openingSoundTimer = null;
+      }
+      stopActiveAudioNodes();
+    }
+
+    function stopAllAudio() {
+      stopDrawBgm();
+      stopOpeningSound();
+    }
+
+    function syncAmbientAudio() {
+      if (state.muted) {
+        stopAllAudio();
+        return;
+      }
+      if (state.view !== "draw") {
+        stopAllAudio();
+        return;
+      }
+      if (state.lastPick || isPicking || isShuffling) {
+        stopDrawBgm();
+        return;
+      }
+      startDrawBgm();
     }
 
     function playTone(frequency, duration, type = "sine", gainValue = 0.05, delay = 0) {
@@ -3308,6 +3374,79 @@
       gain.connect(ctx.destination);
       oscillator.start(ctx.currentTime + delay);
       oscillator.stop(ctx.currentTime + delay + duration + 0.02);
+      trackAudioNode(oscillator);
+    }
+
+    function playNoise(duration, gainValue = 0.02, delay = 0, filterFrequency = 1200, filterType = "bandpass") {
+      const ctx = ensureAudio();
+      if (!ctx) return;
+      const sampleRate = ctx.sampleRate;
+      const buffer = ctx.createBuffer(1, Math.max(1, Math.floor(sampleRate * duration)), sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let index = 0; index < data.length; index += 1) {
+        data[index] = (Math.random() * 2 - 1) * (1 - index / data.length);
+      }
+      const source = ctx.createBufferSource();
+      const filter = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      source.buffer = buffer;
+      filter.type = filterType;
+      filter.frequency.setValueAtTime(filterFrequency, ctx.currentTime + delay);
+      filter.Q.setValueAtTime(0.8, ctx.currentTime + delay);
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + delay);
+      gain.gain.linearRampToValueAtTime(gainValue, ctx.currentTime + delay + 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration);
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      source.start(ctx.currentTime + delay);
+      source.stop(ctx.currentTime + delay + duration + 0.04);
+      trackAudioNode(source);
+    }
+
+    function scheduleDrawBgmPhrase() {
+      if (state.muted || state.view !== "draw" || state.lastPick) return;
+      const melody = [392, 493.88, 587.33, 659.25, 587.33, 493.88];
+      melody.forEach((frequency, index) => {
+        playTone(frequency, 0.14, "sine", 0.008, index * 0.28);
+      });
+      playTone(196, 0.36, "triangle", 0.006, 0);
+      playTone(246.94, 0.32, "triangle", 0.0055, 0.84);
+      playTone(293.66, 0.34, "triangle", 0.005, 1.4);
+    }
+
+    function startDrawBgm() {
+      if (drawBgmActive || state.muted || !audioAllowed) return;
+      const ctx = ensureAudio();
+      if (!ctx) return;
+      drawBgmActive = true;
+      scheduleDrawBgmPhrase();
+      drawBgmTimer = window.setInterval(scheduleDrawBgmPhrase, 2600);
+    }
+
+    function playOpeningSound() {
+      stopDrawBgm();
+      const ctx = ensureAudio();
+      if (!ctx) return;
+      stopActiveAudioNodes();
+      playNoise(2.4, 0.018, 0.04, 820, "bandpass");
+      playNoise(1.6, 0.012, 2.25, 1800, "highpass");
+      playTone(130.81, 1.9, "sawtooth", 0.006, 0.05);
+      playTone(196, 2.2, "triangle", 0.006, 0.42);
+      for (let index = 0; index < 26; index += 1) {
+        const delay = 0.18 + index * 0.115;
+        const frequency = 220 + index * 13;
+        const gain = 0.009 + index * 0.00045;
+        playTone(frequency, 0.055, "triangle", gain, delay);
+      }
+      playTone(523.25, 0.16, "sine", 0.016, 3.55);
+      playTone(659.25, 0.18, "sine", 0.014, 3.75);
+      playTone(783.99, 0.2, "sine", 0.013, 3.95);
+      playNoise(0.5, 0.012, 4.18, 3200, "highpass");
+      openingSoundTimer = window.setTimeout(() => {
+        openingSoundTimer = null;
+        syncAmbientAudio();
+      }, REVEAL_SETTLE_DELAY_MS + 300);
     }
 
     function playRoll() {
