@@ -815,6 +815,16 @@
       animation-play-state: paused;
     }
 
+    .capsule-ring.shuffling .capsule {
+      z-index: 2;
+      filter: brightness(1.08) saturate(1.08);
+      transition: transform 1100ms cubic-bezier(.2,.88,.22,1), filter 260ms ease;
+    }
+
+    .capsule-ring.shuffling .capsule-body {
+      animation-play-state: paused;
+    }
+
     .capsule-ring::before {
       content: "";
       position: absolute;
@@ -1644,6 +1654,7 @@
     const STATE_VERSION = 1;
     const REVEAL_CELEBRATION_DELAY_MS = 4300;
     const REVEAL_SETTLE_DELAY_MS = 5150;
+    const SHUFFLE_ANIMATION_MS = 1100;
     const PHASES = ["lower", "high2", "high3", "teacher"];
     const PERSON_ROLES = ["teacher", "high3", "high2", "high1", "middle3", "middle2", "middle1"];
     const GROUP_COLORS = ["#7c5cff", "#00a8a8", "#ff6b5e", "#ee5ba8", "#3dbb76", "#ffbd3f"];
@@ -1714,6 +1725,7 @@
 
     let state = loadState();
     let isPicking = false;
+    let isShuffling = false;
     let audioCtx = null;
     let confettiPieces = [];
     let confettiFrame = null;
@@ -1816,6 +1828,11 @@
         undoLast();
       }
 
+      if (action === "shuffleCapsules") {
+        menuOpen = false;
+        shuffleCapsules();
+      }
+
       if (action === "resetProgress") {
         confirmAction("처음부터 다시", "진행 중인 뽑기 기록을 지우고 다시 시작할까요?", () => {
           resetProgress();
@@ -1843,7 +1860,7 @@
       if (action === "autoPick") {
         menuOpen = false;
         const firstCapsule = state.capsules[0];
-        if (firstCapsule) pickCapsule({ dataset: { capsuleId: firstCapsule.id } });
+        if (!isShuffling && firstCapsule) pickCapsule({ dataset: { capsuleId: firstCapsule.id } });
       }
 
       if (action === "print") {
@@ -2219,6 +2236,7 @@
       const pending = getPendingParticipants(role);
       const current = pickedPerson || findParticipant(state.currentParticipantId) || pending[0];
       const currentRoleStyle = current ? getRoleStyle(current.role) : "";
+      const canShuffle = !pick && state.capsules.length > 1 && !isPicking && !isShuffling;
 
       if (!pick && !current && isAllAssigned()) {
         state.view = "board";
@@ -2248,12 +2266,13 @@
               </div>
               <div class="toolbar">
                 ${onlyOne ? `<button class="btn teal" data-action="autoPick">자동 배정</button>` : ""}
-                ${pick ? "" : `<button class="btn icon" title="되돌리기" data-action="undo" ${state.history.length ? "" : "disabled"} aria-label="되돌리기">↶</button>`}
+                ${pick ? "" : `<button class="btn teal" data-action="shuffleCapsules" ${canShuffle ? "" : "disabled"}>캡슐 섞기</button>`}
+                ${pick ? "" : `<button class="btn icon" title="되돌리기" data-action="undo" ${state.history.length && !isShuffling ? "" : "disabled"} aria-label="되돌리기">↶</button>`}
               </div>
             </div>
             <div class="capsule-stage ${pick ? "revealing" : ""}" ${pick && pickedGroup ? `style="--revealWash:${hexToRgba(pickedGroup.color, 0.18)}"` : ""}>
               ${pick ? renderInlineReveal(pick) : `
-                <div class="capsule-ring ${isPicking ? "paused" : ""}" aria-label="캡슐 선택">
+                <div class="capsule-ring ${isPicking || isShuffling ? "paused" : ""} ${isShuffling ? "shuffling" : ""}" aria-label="캡슐 선택">
                   ${renderCapsuleSlots()}
                 </div>
               `}
@@ -2355,9 +2374,9 @@
       const slotIndex = Number.isFinite(Number(capsule.slotIndex)) ? Number(capsule.slotIndex) : Number(capsule.label || 1) - 1;
       const angle = (360 / Math.max(total, 1)) * slotIndex;
       return `
-        <button class="capsule" data-capsule-id="${capsule.id}" style="--angle:${angle}deg" aria-label="${slotIndex + 1}번 캡슐">
+        <button class="capsule" data-capsule-id="${capsule.id}" style="--angle:${angle}deg" aria-label="캡슐 선택">
           <span class="capsule-body">
-            <span class="sr-only">${slotIndex + 1}번</span>
+            <span class="sr-only">캡슐 선택</span>
           </span>
         </button>
       `;
@@ -2844,8 +2863,79 @@
       }));
     }
 
+    function shuffleCapsules() {
+      if (isPicking || isShuffling || state.lastPick || state.capsules.length < 2) return;
+
+      const ring = app.querySelector(".capsule-ring");
+      const shuffleButton = app.querySelector('[data-action="shuffleCapsules"]');
+      const total = Math.max(state.phaseSlotCount || state.capsules.length, state.capsules.length, 1);
+      const currentSlots = state.capsules.map((capsule, index) => {
+        const slotIndex = Number(capsule.slotIndex);
+        return Number.isFinite(slotIndex) ? slotIndex : index;
+      });
+      const nextSlots = shuffleSlotOrder(currentSlots);
+      const moves = state.capsules.map((capsule, index) => ({
+        capsule,
+        slotIndex: nextSlots[index]
+      }));
+
+      isShuffling = true;
+      playShuffle();
+      if (shuffleButton) shuffleButton.disabled = true;
+
+      if (ring) {
+        ring.classList.add("paused", "shuffling");
+        ring.setAttribute("aria-busy", "true");
+      }
+
+      const applyMoves = () => {
+        moves.forEach(({ capsule, slotIndex }) => {
+          capsule.slotIndex = slotIndex;
+          const angle = (360 / Math.max(total, 1)) * slotIndex;
+          const capsuleEl = ring?.querySelector(`[data-capsule-id="${capsule.id}"]`);
+          if (capsuleEl) {
+            capsuleEl.style.setProperty("--angle", `${angle}deg`);
+          }
+        });
+        state.capsules.sort((left, right) => Number(left.slotIndex) - Number(right.slotIndex));
+        saveState();
+      };
+
+      if (ring) {
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(applyMoves);
+        });
+      } else {
+        applyMoves();
+      }
+
+      window.setTimeout(() => {
+        isShuffling = false;
+        if (ring) {
+          ring.classList.remove("paused", "shuffling");
+          ring.removeAttribute("aria-busy");
+        }
+        const liveShuffleButton = app.querySelector('[data-action="shuffleCapsules"]');
+        if (liveShuffleButton && !state.lastPick && state.capsules.length > 1) liveShuffleButton.disabled = false;
+      }, SHUFFLE_ANIMATION_MS + 140);
+    }
+
+    function shuffleSlotOrder(slots) {
+      const original = slots.slice();
+      let result = shuffle(original);
+      let attempts = 0;
+      while (attempts < 8 && result.every((slot, index) => slot === original[index])) {
+        result = shuffle(original);
+        attempts += 1;
+      }
+      if (result.every((slot, index) => slot === original[index])) {
+        result = original.slice(1).concat(original[0]);
+      }
+      return result;
+    }
+
     function pickCapsule(el) {
-      if (isPicking) return;
+      if (isPicking || isShuffling) return;
       const capsuleId = el.dataset.capsuleId;
       const capsule = state.capsules.find((item) => item.id === capsuleId);
       const person = findParticipant(state.currentParticipantId);
@@ -2894,6 +2984,7 @@
     }
 
     function undoLast() {
+      if (isShuffling) return;
       if (!state.history.length) return;
       const remaining = state.history.slice(0, -1);
       const previous = state.history[state.history.length - 1];
@@ -3091,6 +3182,13 @@
       playTone(260, 0.08, "triangle", 0.03, 0.16);
     }
 
+    function playShuffle() {
+      playTone(210, 0.07, "triangle", 0.026);
+      playTone(260, 0.07, "triangle", 0.024, 0.08);
+      playTone(190, 0.07, "triangle", 0.022, 0.16);
+      playTone(300, 0.08, "triangle", 0.024, 0.24);
+    }
+
     function playDing() {
       playTone(523.25, 0.16, "sine", 0.05);
       playTone(659.25, 0.18, "sine", 0.045, 0.08);
@@ -3110,6 +3208,7 @@
       buildPhasePool,
       bindCapsules,
       pickCapsule,
+      shuffleCapsules,
       assign,
       undoLast,
       getState: () => JSON.parse(JSON.stringify(state))
