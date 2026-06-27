@@ -170,6 +170,36 @@
       min-height: 44px;
     }
 
+    .menu-sound {
+      display: grid;
+      gap: 12px;
+      padding: 12px 4px 4px;
+      border-top: 1px solid var(--line);
+    }
+
+    .volume-control {
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr) 42px;
+      align-items: center;
+      gap: 9px;
+      color: #2d374b;
+      font-size: 14px;
+      font-weight: 900;
+    }
+
+    .volume-control input[type="range"] {
+      width: 100%;
+      margin: 0;
+      accent-color: var(--purple);
+      cursor: pointer;
+    }
+
+    .volume-control output {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
     .screen {
       width: min(1180px, calc(100vw - 32px));
       margin: 0 auto;
@@ -433,6 +463,96 @@
 
     .settings-screen .form-grid {
       gap: 8px;
+    }
+
+    .draw-method-switch {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .draw-method-option {
+      position: relative;
+      display: block;
+      min-width: 0;
+      cursor: pointer;
+    }
+
+    .draw-method-option input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .draw-method-option span {
+      display: grid;
+      gap: 2px;
+      min-height: 54px;
+      padding: 8px 10px;
+      border: 2px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--muted);
+      transition: border-color 160ms ease, background 160ms ease, color 160ms ease;
+    }
+
+    .draw-method-option strong {
+      color: var(--ink);
+      font-size: 15px;
+      line-height: 1.15;
+    }
+
+    .draw-method-option small {
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .draw-method-option input:checked + span {
+      border-color: var(--purple);
+      background: rgba(124, 92, 255, 0.1);
+      color: #5b43d6;
+    }
+
+    .draw-method-option input:focus-visible + span {
+      outline: 3px solid rgba(124, 92, 255, 0.22);
+      outline-offset: 2px;
+    }
+
+    .balanced-phase-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .balanced-phase-item {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      align-items: center;
+      gap: 7px;
+      min-height: 38px;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--wash);
+      color: #354158;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1.2;
+    }
+
+    .balanced-phase-item b {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #fff;
+      color: var(--phase-color, var(--purple));
+      border: 1px solid var(--phase-color, var(--purple));
+      font-size: 12px;
     }
 
     .settings-screen .validation {
@@ -1731,7 +1851,13 @@
     const REVEAL_CELEBRATION_DELAY_MS = 5520;
     const REVEAL_SETTLE_DELAY_MS = 6500;
     const SHUFFLE_ANIMATION_MS = 1100;
-    const PHASES = ["lower", "high2", "high3", "teacher"];
+    const SOUND_CALIBRATION_VERSION = 2;
+    const BGM_OUTPUT_SCALE = 3;
+    const EFFECTS_OUTPUT_SCALE = 2.5;
+    const DRAW_METHODS = {
+      classic: ["lower", "high2", "high3", "teacher"],
+      balanced: ["middle", "upper", "high2", "teacher"]
+    };
     const PERSON_ROLES = ["teacher", "high3", "high2", "high1", "middle3", "middle2", "middle1"];
     const GROUP_COLORS = ["#7c5cff", "#00a8a8", "#ff6b5e", "#ee5ba8", "#3dbb76", "#ffbd3f"];
     const ROLE_META = {
@@ -1739,6 +1865,18 @@
         label: "고1·중3·중2·중1",
         title: "고1·중3·중2·중1 뽑기",
         badge: "1단계",
+        color: "#7c5cff"
+      },
+      middle: {
+        label: "중3·중2·중1",
+        title: "중3·중2·중1 뽑기",
+        badge: "1단계",
+        color: "#3dbb76"
+      },
+      upper: {
+        label: "고1·고3",
+        title: "고1·고3 뽑기",
+        badge: "2단계",
         color: "#7c5cff"
       },
       high2: {
@@ -1803,6 +1941,8 @@
     let isPicking = false;
     let isShuffling = false;
     let audioCtx = null;
+    let bgmGainNode = null;
+    let effectsGainNode = null;
     let audioAllowed = false;
     let drawBgmTimer = null;
     let drawBgmActive = false;
@@ -1956,6 +2096,14 @@
     app.addEventListener("change", (event) => {
       const target = event.target;
 
+      if (target.matches("[data-draw-method]")) {
+        state.config.drawMethod = target.value === "balanced" ? "balanced" : "classic";
+        clearRunArtifacts();
+        saveState();
+        render();
+        return;
+      }
+
       if (target.matches("[data-config]")) {
         updateConfig(target.dataset.config, target.value);
       }
@@ -1989,6 +2137,17 @@
       }
     });
 
+    app.addEventListener("input", (event) => {
+      const target = event.target;
+      if (!target.matches("[data-volume]")) return;
+      const key = target.dataset.volume === "bgm" ? "bgmVolume" : "effectsVolume";
+      state.sound[key] = clampVolume(target.value);
+      const output = app.querySelector(`[data-volume-output="${target.dataset.volume}"]`);
+      if (output) output.value = `${state.sound[key]}%`;
+      updateAudioBusVolumes();
+      saveState();
+    });
+
     modalRoot.addEventListener("click", (event) => {
       const action = event.target.closest("[data-modal-action]")?.dataset.modalAction;
       if (!action && event.target !== modalRoot) return;
@@ -2001,6 +2160,7 @@
         version: STATE_VERSION,
         view: "start",
         config: {
+          drawMethod: "classic",
           groupCount: 4,
           groupSize: 5,
           roleCounts: {
@@ -2018,7 +2178,13 @@
         phaseSlotCount: 0,
         lastPick: null,
         history: [],
+        balanceOrder: [],
         muted: false,
+        sound: {
+          calibrationVersion: SOUND_CALIBRATION_VERSION,
+          bgmVolume: 50,
+          effectsVolume: 50
+        },
         startedAt: null,
         completedAt: null
       };
@@ -2050,6 +2216,9 @@
     function normalizeState(input) {
       const base = defaultState();
       const incomingRoleCounts = input.config?.roleCounts || {};
+      const incomingSound = input.sound?.calibrationVersion === SOUND_CALIBRATION_VERSION
+        ? input.sound
+        : {};
       const next = {
         ...base,
         ...input,
@@ -2063,6 +2232,10 @@
             teacher: Number(incomingRoleCounts.teacher ?? base.config.roleCounts.teacher)
           }
         },
+        sound: {
+          ...base.sound,
+          ...incomingSound
+        },
         participants: Array.isArray(input.participants) ? input.participants : [],
         groups: Array.isArray(input.groups) ? input.groups : base.groups,
         capsules: Array.isArray(input.capsules) ? input.capsules : [],
@@ -2070,7 +2243,20 @@
         history: Array.isArray(input.history) ? input.history : []
       };
 
+      next.config.drawMethod = next.config.drawMethod === "balanced" ? "balanced" : "classic";
       next.groups = createGroups(Number(next.config.groupCount) || 4, next.groups);
+      const groupIds = new Set(next.groups.map((group) => group.id));
+      next.balanceOrder = Array.isArray(input.balanceOrder)
+        ? input.balanceOrder.filter((groupId) => groupIds.has(groupId))
+        : [];
+      next.groups.forEach((group) => {
+        if (!next.balanceOrder.includes(group.id)) next.balanceOrder.push(group.id);
+      });
+      if (!getDrawPhases(next.config.drawMethod).includes(next.phaseRole)) {
+        next.phaseRole = getDrawPhases(next.config.drawMethod)[0];
+      }
+      next.sound.bgmVolume = clampVolume(next.sound.bgmVolume);
+      next.sound.effectsVolume = clampVolume(next.sound.effectsVolume);
       next.participants = next.participants.map((person) => ({
         id: person.id || makeId("person"),
         name: person.name || "이름 없음",
@@ -2089,6 +2275,27 @@
 
     function saveState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function clampVolume(value) {
+      return Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+    }
+
+    function getDrawPhases(method = state?.config?.drawMethod) {
+      return DRAW_METHODS[method === "balanced" ? "balanced" : "classic"];
+    }
+
+    function isBalancedMethod() {
+      return state.config.drawMethod === "balanced";
+    }
+
+    function getPhaseMeta(role) {
+      const base = ROLE_META[role] || ROLE_META.lower;
+      const phaseIndex = getDrawPhases().indexOf(role);
+      return {
+        ...base,
+        badge: `${Math.max(phaseIndex, 0) + 1}단계`
+      };
     }
 
     function makeId(prefix) {
@@ -2140,6 +2347,18 @@
                 <button class="btn" role="menuitem" data-action="view" data-value="board">전체 보드</button>
                 <button class="btn" role="menuitem" data-action="toggleMute">${state.muted ? "소리 켜기" : "음소거"}</button>
               </div>
+              <div class="menu-sound">
+                <label class="volume-control">
+                  <span>배경음</span>
+                  <input type="range" min="0" max="100" step="5" value="${state.sound.bgmVolume}" data-volume="bgm" aria-label="배경음 볼륨">
+                  <output data-volume-output="bgm">${state.sound.bgmVolume}%</output>
+                </label>
+                <label class="volume-control">
+                  <span>효과음</span>
+                  <input type="range" min="0" max="100" step="5" value="${state.sound.effectsVolume}" data-volume="effects" aria-label="효과음 볼륨">
+                  <output data-volume-output="effects">${state.sound.effectsVolume}%</output>
+                </label>
+              </div>
             </div>
           ` : ""}
         </div>
@@ -2183,13 +2402,16 @@
 
     function renderSettings() {
       const validation = validateSetup();
+      const balanced = isBalancedMethod();
       return `
         <main class="screen settings-screen">
           <section class="panel settings-panel">
             <div class="panel-head">
               <div>
                 <h2>인원 설정</h2>
-                <p>기본값은 4개 조 기준 기본 5명, 고3 1명은 캡슐 4개 중 1개를 뽑아 한 조에 추가 배정됩니다.</p>
+                <p>${balanced
+                  ? "중등부를 먼저 균등 배정한 뒤, 고1·고3을 앞선 결과에 맞춰 다시 균형 있게 배정합니다."
+                  : "기본값은 4개 조 기준 기본 5명, 고3 1명은 캡슐 4개 중 1개를 뽑아 한 조에 추가 배정됩니다."}</p>
               </div>
               <div class="toolbar">
                 <button class="btn" data-action="resetProgress">진행 초기화</button>
@@ -2198,29 +2420,54 @@
             </div>
             <div class="panel-body settings-grid">
               <div class="stack settings-controls">
+                <div class="draw-method-switch" role="radiogroup" aria-label="뽑기 방식">
+                  <label class="draw-method-option">
+                    <input type="radio" name="drawMethod" value="classic" data-draw-method ${balanced ? "" : "checked"}>
+                    <span><strong>뽑기 방식 1</strong><small>소그룹 별 중고등부 비중 랜덤</small></span>
+                  </label>
+                  <label class="draw-method-option">
+                    <input type="radio" name="drawMethod" value="balanced" data-draw-method ${balanced ? "checked" : ""}>
+                    <span><strong>뽑기 방식 2</strong><small>소그룹 별 중고등부 비중 균형</small></span>
+                  </label>
+                </div>
                 <div class="form-grid">
                   <label>조 수
                     <input type="number" min="1" max="12" value="${state.config.groupCount}" data-config="groupCount">
                   </label>
-                  <label>조당 인원
-                    <input type="number" min="1" max="20" value="${state.config.groupSize}" data-config="groupSize">
-                  </label>
+                  ${balanced ? `
+                    <label>예상 조별 인원
+                      <input value="${escapeHtml(getBalancedGroupSizeSummary())}" aria-label="예상 조별 인원" readonly>
+                    </label>
+                  ` : `
+                    <label>조당 인원
+                      <input type="number" min="1" max="20" value="${state.config.groupSize}" data-config="groupSize">
+                    </label>
+                  `}
                 </div>
-                <div class="form-grid">
-                  <label>고1·중3·중2·중1/조
-                    <input type="number" min="0" max="20" value="${state.config.roleCounts.lower}" data-config="roleCounts.lower">
-                  </label>
-                  <label>고2/조
-                    <input type="number" min="0" max="20" value="${state.config.roleCounts.high2}" data-config="roleCounts.high2">
-                  </label>
-                  <label>고3 전체
-                    <input type="number" min="0" max="20" value="${state.config.roleCounts.high3}" data-config="roleCounts.high3">
-                  </label>
-                  <label>교사/조
-                    <input type="number" min="0" max="20" value="${state.config.roleCounts.teacher}" data-config="roleCounts.teacher">
-                  </label>
-                </div>
-                <p class="muted">고1, 중3, 중2, 중1은 첫 단계에서 각 조 3명씩 배정됩니다. 고3은 전체 인원 기준으로 입력합니다.</p>
+                ${balanced ? `
+                  <div class="balanced-phase-grid" aria-label="뽑기 방식 2 단계">
+                    <div class="balanced-phase-item" style="--phase-color:${ROLE_META.middle.color}"><b>1</b><span>중3·중2·중1 균등</span></div>
+                    <div class="balanced-phase-item" style="--phase-color:${ROLE_META.upper.color}"><b>2</b><span>고1·고3 균형 보정</span></div>
+                    <div class="balanced-phase-item" style="--phase-color:${ROLE_META.high2.color}"><b>3</b><span>고2 각 조 1명</span></div>
+                    <div class="balanced-phase-item" style="--phase-color:${ROLE_META.teacher.color}"><b>4</b><span>교사 각 조 1명</span></div>
+                  </div>
+                ` : `
+                  <div class="form-grid">
+                    <label>고1·중3·중2·중1/조
+                      <input type="number" min="0" max="20" value="${state.config.roleCounts.lower}" data-config="roleCounts.lower">
+                    </label>
+                    <label>고2/조
+                      <input type="number" min="0" max="20" value="${state.config.roleCounts.high2}" data-config="roleCounts.high2">
+                    </label>
+                    <label>고3 전체
+                      <input type="number" min="0" max="20" value="${state.config.roleCounts.high3}" data-config="roleCounts.high3">
+                    </label>
+                    <label>교사/조
+                      <input type="number" min="0" max="20" value="${state.config.roleCounts.teacher}" data-config="roleCounts.teacher">
+                    </label>
+                  </div>
+                  <p class="muted">고1, 중3, 중2, 중1은 첫 단계에서 각 조 3명씩 배정됩니다. 고3은 전체 인원 기준으로 입력합니다.</p>
+                `}
                 ${renderValidation(validation)}
               </div>
               <div class="stack settings-roster">
@@ -2300,11 +2547,12 @@
       return `
         <div class="validation ${validation.ok ? "" : "danger"}">
           <div class="chip-row">
-            ${PHASES.map((role) => {
+            ${getDrawPhases().map((role) => {
               const item = validation.roles[role];
-              return `<span class="chip ${item.ok ? "ok" : "bad"}">${ROLE_META[role].label} <strong>${item.actual}/${item.expected}</strong></span>`;
+              const count = item.flexible ? `${item.actual}명` : `${item.actual}/${item.expected}`;
+              return `<span class="chip ${item.ok ? "ok" : "bad"}">${ROLE_META[role].label} <strong>${count}</strong></span>`;
             }).join("")}
-            <span class="chip ${validation.totalOk ? "ok" : "bad"}">전체 <strong>${validation.actualTotal}/${validation.expectedTotal}</strong></span>
+            <span class="chip ${validation.totalOk ? "ok" : "bad"}">전체 <strong>${validation.flexibleTotal ? `${validation.actualTotal}명` : `${validation.actualTotal}/${validation.expectedTotal}`}</strong></span>
           </div>
           <strong>${validation.ok ? "준비 완료" : validation.messages.join(" · ")}</strong>
         </div>
@@ -2317,7 +2565,7 @@
       const pickedPerson = pick ? findParticipant(pick.personId) : null;
       const pickedGroup = pick ? state.groups.find((item) => item.id === pick.groupId) : null;
       const role = pick ? getParticipantPhase(pick.role) : state.phaseRole;
-      const meta = ROLE_META[role];
+      const meta = getPhaseMeta(role);
       const pending = getPendingParticipants(role);
       const current = pickedPerson || findParticipant(state.currentParticipantId) || pending[0];
       const currentRoleStyle = current ? getRoleStyle(current.role) : "";
@@ -2771,14 +3019,21 @@
     function getParticipantPhase(personOrRole) {
       const role = normalizePersonRole(typeof personOrRole === "string" ? personOrRole : personOrRole?.role);
       if (role === "teacher") return "teacher";
-      if (role === "high3") return "high3";
       if (role === "high2") return "high2";
+      if (isBalancedMethod()) {
+        if (role === "high1" || role === "high3") return "upper";
+        return "middle";
+      }
+      if (role === "high3") return "high3";
       return "lower";
     }
 
     function fillSampleRoster(shouldRender = true) {
       const defaults = defaultState();
-      state.config = defaults.config;
+      state.config = {
+        ...defaults.config,
+        drawMethod: state.config.drawMethod
+      };
       state.participants = SAMPLE_LINES.map(parseRosterLine).filter(Boolean).map((item) => ({
         id: makeId("person"),
         name: item.name,
@@ -2812,7 +3067,7 @@
 
     function clearRunArtifacts() {
       state.participants = state.participants.map((person) => ({ ...person, groupId: null }));
-      state.phaseRole = "lower";
+      state.phaseRole = getDrawPhases()[0];
       state.currentParticipantId = null;
       state.capsules = [];
       state.phaseSlotCount = 0;
@@ -2820,21 +3075,50 @@
       state.history = [];
       state.startedAt = null;
       state.completedAt = null;
+      state.balanceOrder = [];
       celebratedPickKey = null;
     }
 
     function validateSetup() {
       const roleCounts = countByRole();
       const groupCount = Number(state.config.groupCount) || 0;
-      const groupSize = Number(state.config.groupSize) || 0;
-      const basePerGroupRoles = ["lower", "high2", "teacher"];
-      const perGroupSum = basePerGroupRoles.reduce((sum, role) => sum + Number(state.config.roleCounts[role] || 0), 0);
-      const expectedTotal = groupCount * groupSize + Number(state.config.roleCounts.high3 || 0);
       const actualTotal = state.participants.length;
       const roles = {};
       const messages = [];
 
-      PHASES.forEach((role) => {
+      if (isBalancedMethod()) {
+        ["middle", "upper"].forEach((role) => {
+          roles[role] = {
+            expected: roleCounts[role] || 0,
+            actual: roleCounts[role] || 0,
+            ok: true,
+            flexible: true
+          };
+        });
+        ["high2", "teacher"].forEach((role) => {
+          const expected = groupCount;
+          const actual = roleCounts[role] || 0;
+          roles[role] = { expected, actual, ok: expected === actual };
+          if (expected !== actual) messages.push(`${ROLE_META[role].label} ${actual}/${expected}`);
+        });
+
+        return {
+          ok: messages.length === 0 && actualTotal > 0,
+          roles,
+          expectedTotal: actualTotal,
+          actualTotal,
+          totalOk: actualTotal > 0,
+          flexibleTotal: true,
+          messages: messages.length ? messages : ["확인 완료"]
+        };
+      }
+
+      const groupSize = Number(state.config.groupSize) || 0;
+      const basePerGroupRoles = ["lower", "high2", "teacher"];
+      const perGroupSum = basePerGroupRoles.reduce((sum, role) => sum + Number(state.config.roleCounts[role] || 0), 0);
+      const expectedTotal = groupCount * groupSize + Number(state.config.roleCounts.high3 || 0);
+
+      getDrawPhases().forEach((role) => {
         const expected = role === "high3"
           ? Number(state.config.roleCounts.high3 || 0)
           : groupCount * Number(state.config.roleCounts[role] || 0);
@@ -2857,6 +3141,7 @@
         expectedTotal,
         actualTotal,
         totalOk: actualTotal === expectedTotal,
+        flexibleTotal: false,
         messages: messages.length ? messages : ["확인 완료"]
       };
     }
@@ -2866,7 +3151,7 @@
         const phase = getParticipantPhase(person);
         counts[phase] = (counts[phase] || 0) + 1;
         return counts;
-      }, { lower: 0, high2: 0, high3: 0, teacher: 0 });
+      }, Object.fromEntries(getDrawPhases().map((phase) => [phase, 0])));
     }
 
     function startDrawing() {
@@ -2878,7 +3163,10 @@
         return;
       }
       state.participants = state.participants.map((person) => ({ ...person, groupId: null }));
-      state.phaseRole = PHASES.find((role) => getParticipantsByRole(role).length > 0) || "lower";
+      state.balanceOrder = isBalancedMethod()
+        ? shuffle(state.groups.map((group) => group.id))
+        : [];
+      state.phaseRole = getDrawPhases().find((role) => getParticipantsByRole(role).length > 0) || getDrawPhases()[0];
       state.currentParticipantId = pickRandomPendingParticipantId(state.phaseRole);
       state.capsules = [];
       state.phaseSlotCount = 0;
@@ -2906,7 +3194,7 @@
 
     function resetProgress() {
       state.participants = state.participants.map((person) => ({ ...person, groupId: null }));
-      state.phaseRole = "lower";
+      state.phaseRole = getDrawPhases()[0];
       state.currentParticipantId = null;
       state.capsules = [];
       state.phaseSlotCount = 0;
@@ -2914,6 +3202,7 @@
       state.history = [];
       state.startedAt = null;
       state.completedAt = null;
+      state.balanceOrder = [];
     }
 
     function prepareDrawView() {
@@ -2939,7 +3228,7 @@
         state.currentParticipantId = pickRandomPendingParticipantId(state.phaseRole);
       }
 
-      const shouldRebindCapsules = state.phaseRole === "high3"
+      const shouldRebindCapsules = !isBalancedMethod() && state.phaseRole === "high3"
         ? state.capsules.length < pending.length
         : state.capsules.length !== pending.length;
 
@@ -2963,6 +3252,18 @@
     }
 
     function buildPhasePool(role) {
+      if (isBalancedMethod()) {
+        if (role === "middle") {
+          return buildBalancedPool(getPendingParticipants(role).length);
+        }
+        if (role === "upper") {
+          return buildBalancedPool(getPendingParticipants(role).length, getAssignedCountsByGroup("middle"));
+        }
+        if (role === "high2" || role === "teacher") {
+          return shuffle(state.groups.map((group) => group.id));
+        }
+      }
+
       if (role === "high3") {
         return shuffle(state.groups.map((group) => group.id));
       }
@@ -2975,6 +3276,38 @@
         }
       });
       return shuffle(pool);
+    }
+
+    function getBalanceOrder() {
+      const validGroupIds = new Set(state.groups.map((group) => group.id));
+      const saved = (state.balanceOrder || []).filter((groupId) => validGroupIds.has(groupId));
+      const missing = state.groups.map((group) => group.id).filter((groupId) => !saved.includes(groupId));
+      return saved.concat(missing);
+    }
+
+    function allocateBalancedGroups(count, baseCounts = {}) {
+      const order = getBalanceOrder();
+      const totals = Object.fromEntries(order.map((groupId) => [groupId, Number(baseCounts[groupId] || 0)]));
+      const allocation = [];
+      for (let index = 0; index < count; index += 1) {
+        const minimum = Math.min(...order.map((groupId) => totals[groupId]));
+        const groupId = order.find((candidateId) => totals[candidateId] === minimum);
+        if (!groupId) break;
+        totals[groupId] += 1;
+        allocation.push(groupId);
+      }
+      return allocation;
+    }
+
+    function buildBalancedPool(count, baseCounts = {}) {
+      return shuffle(allocateBalancedGroups(count, baseCounts));
+    }
+
+    function getAssignedCountsByGroup(phase) {
+      return Object.fromEntries(state.groups.map((group) => [
+        group.id,
+        state.participants.filter((person) => person.groupId === group.id && getParticipantPhase(person) === phase).length
+      ]));
     }
 
     function bindCapsules(pool) {
@@ -3146,7 +3479,7 @@
     }
 
     function getActiveRole() {
-      return PHASES.find((role) => getPendingParticipants(role).length > 0) || null;
+      return getDrawPhases().find((role) => getPendingParticipants(role).length > 0) || null;
     }
 
     function getParticipantsByRole(role) {
@@ -3164,6 +3497,16 @@
     }
 
     function getGroupTarget(groupId, pendingPick = null) {
+      if (isBalancedMethod()) {
+        const balancedStudentCount = state.participants.filter((person) => {
+          const role = normalizePersonRole(person.role);
+          return role !== "high2" && role !== "teacher";
+        }).length;
+        const balancedGroups = allocateBalancedGroups(balancedStudentCount);
+        const balancedTarget = balancedGroups.filter((targetGroupId) => targetGroupId === groupId).length;
+        return balancedTarget + 2;
+      }
+
       let high3Members = state.participants.filter((person) => person.groupId === groupId && person.role === "high3").length;
       const pendingPerson = pendingPick ? findParticipant(pendingPick.personId) : null;
       const pendingRole = normalizePersonRole(pendingPick?.role);
@@ -3173,16 +3516,22 @@
       return Number(state.config.groupSize || 0) + high3Members;
     }
 
+    function getBalancedGroupSizeSummary() {
+      const groupCount = Math.max(Number(state.config.groupCount) || 0, 1);
+      const total = state.participants.length;
+      const minimum = Math.floor(total / groupCount);
+      const maximum = Math.ceil(total / groupCount);
+      return minimum === maximum ? `${minimum}명` : `${minimum}~${maximum}명`;
+    }
+
     function getGroupMembers(groupId) {
-      const phaseOrder = { teacher: 0, high3: 1, high2: 2, lower: 3 };
       const roleOrder = Object.fromEntries(PERSON_ROLES.map((role, index) => [role, index]));
       return state.participants
         .filter((person) => person.groupId === groupId)
         .slice()
         .sort((a, b) => {
-          const phaseDiff = phaseOrder[getParticipantPhase(a)] - phaseOrder[getParticipantPhase(b)];
-          if (phaseDiff !== 0) return phaseDiff;
-          return roleOrder[a.role] - roleOrder[b.role] || a.name.localeCompare(b.name, "ko");
+          const roleDiff = roleOrder[normalizePersonRole(a.role)] - roleOrder[normalizePersonRole(b.role)];
+          return roleDiff || a.name.localeCompare(b.name, "ko");
         });
     }
 
@@ -3300,9 +3649,28 @@
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return null;
         audioCtx = new AudioContext();
+        bgmGainNode = audioCtx.createGain();
+        effectsGainNode = audioCtx.createGain();
+        bgmGainNode.connect(audioCtx.destination);
+        effectsGainNode.connect(audioCtx.destination);
+        updateAudioBusVolumes(true);
       }
       if (audioCtx.state === "suspended") audioCtx.resume();
       return audioCtx;
+    }
+
+    function updateAudioBusVolumes(immediate = false) {
+      if (!audioCtx || !bgmGainNode || !effectsGainNode) return;
+      const now = audioCtx.currentTime;
+      const bgmGain = (state.sound.bgmVolume / 100) * BGM_OUTPUT_SCALE;
+      const effectsGain = (state.sound.effectsVolume / 100) * EFFECTS_OUTPUT_SCALE;
+      if (immediate) {
+        bgmGainNode.gain.setValueAtTime(bgmGain, now);
+        effectsGainNode.gain.setValueAtTime(effectsGain, now);
+        return;
+      }
+      bgmGainNode.gain.setTargetAtTime(bgmGain, now, 0.03);
+      effectsGainNode.gain.setTargetAtTime(effectsGain, now, 0.03);
     }
 
     function trackAudioNode(node) {
@@ -3360,7 +3728,7 @@
       startDrawBgm();
     }
 
-    function playTone(frequency, duration, type = "sine", gainValue = 0.05, delay = 0) {
+    function playTone(frequency, duration, type = "sine", gainValue = 0.05, delay = 0, channel = "effects") {
       const ctx = ensureAudio();
       if (!ctx) return;
       const oscillator = ctx.createOscillator();
@@ -3371,13 +3739,13 @@
       gain.gain.exponentialRampToValueAtTime(gainValue, ctx.currentTime + delay + 0.015);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration);
       oscillator.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(channel === "bgm" ? bgmGainNode : effectsGainNode);
       oscillator.start(ctx.currentTime + delay);
       oscillator.stop(ctx.currentTime + delay + duration + 0.02);
       trackAudioNode(oscillator);
     }
 
-    function playNoise(duration, gainValue = 0.02, delay = 0, filterFrequency = 1200, filterType = "bandpass") {
+    function playNoise(duration, gainValue = 0.02, delay = 0, filterFrequency = 1200, filterType = "bandpass", channel = "effects") {
       const ctx = ensureAudio();
       if (!ctx) return;
       const sampleRate = ctx.sampleRate;
@@ -3398,7 +3766,7 @@
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + delay + duration);
       source.connect(filter);
       filter.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(channel === "bgm" ? bgmGainNode : effectsGainNode);
       source.start(ctx.currentTime + delay);
       source.stop(ctx.currentTime + delay + duration + 0.04);
       trackAudioNode(source);
@@ -3408,11 +3776,11 @@
       if (state.muted || state.view !== "draw" || state.lastPick) return;
       const melody = [392, 493.88, 587.33, 659.25, 587.33, 493.88];
       melody.forEach((frequency, index) => {
-        playTone(frequency, 0.14, "sine", 0.008, index * 0.28);
+        playTone(frequency, 0.14, "sine", 0.008, index * 0.28, "bgm");
       });
-      playTone(196, 0.36, "triangle", 0.006, 0);
-      playTone(246.94, 0.32, "triangle", 0.0055, 0.84);
-      playTone(293.66, 0.34, "triangle", 0.005, 1.4);
+      playTone(196, 0.36, "triangle", 0.006, 0, "bgm");
+      playTone(246.94, 0.32, "triangle", 0.0055, 0.84, "bgm");
+      playTone(293.66, 0.34, "triangle", 0.005, 1.4, "bgm");
     }
 
     function startDrawBgm() {
